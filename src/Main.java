@@ -34,40 +34,49 @@ public class Main {
 
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9\\s]");
     private static final Pattern MULTI_SPACES = Pattern.compile("\\s+");
+    private static final long TIME_WINDOW_HOURS = 24;
 
     public static String normalizeAddress(String address) {
         if (address == null) return "";
         String s = address.toLowerCase();
         s = NON_ALNUM.matcher(s).replaceAll(" ");
+        s = MULTI_SPACES.matcher(s).replaceAll(" ").trim();
         s = s.replaceAll("\\b(n y c)\\b", "new york city");
         s = s.replaceAll("\\bnyc\\b", "new york city");
-        s = s.replaceAll("\\bstreet\\b", "st");
         s = s.replaceAll("\\bavenue\\b", "ave");
+        s = s.replaceAll("\\bstreet\\b", "st");
         s = s.replaceAll("\\broad\\b", "rd");
+        s = s.replaceAll("\\bdrive\\b", "dr");
         s = s.replaceAll("\\bapartment\\b", "apt");
         s = s.replaceAll("\\bunit\\b", "apt");
         s = s.replaceAll("\\bsuite\\b", "apt");
         s = s.replaceAll("\\bapt\\b\\s*-?\\s*(\\d+)([a-z]*)", "apt$1$2");
         s = s.replaceAll("\\bapt\\s+(\\d+)([a-z]*)\\b", "apt$1$2");
         s = s.replaceAll("\\b(\\d+)\\s+apt\\b", "$1 apt");
-        s = MULTI_SPACES.matcher(s).replaceAll(" ").trim();
         return s;
     }
 
     public static List<String> detectFraud(List<Order> orders) {
-        Map<String, OrderInfo> recent = new HashMap<>();
+        Map<String, List<OrderInfo>> recentOrders = new HashMap<>();
         List<String> alerts = new ArrayList<>();
+
         for (Order o : orders) {
             String key = normalizeAddress(o.address);
-            if (recent.containsKey(key)) {
-                OrderInfo prev = recent.get(key);
-                Duration diff = Duration.between(prev.timestamp, o.timestamp);
-                if (!o.email.equalsIgnoreCase(prev.email) && Math.abs(diff.toHours()) <= 24) {
-                    alerts.add(o.orderId + " - Matches previous order " + prev.orderId + " (different email, same address)");
+            List<OrderInfo> orderList = recentOrders.getOrDefault(key, new ArrayList<>());
+            orderList.removeIf(prev -> Duration.between(prev.timestamp, o.timestamp).toHours() > TIME_WINDOW_HOURS);
+            for (OrderInfo prev : orderList) {
+                if (!o.email.equalsIgnoreCase(prev.email) &&
+                        Math.abs(Duration.between(prev.timestamp, o.timestamp).toHours()) <= TIME_WINDOW_HOURS) {
+                    alerts.add("FRAUD ALERT: " + o.orderId +
+                            " - Matches previous order " + prev.orderId +
+                            " (different email, same address)");
+                    break;
                 }
             }
-            recent.put(key, new OrderInfo(o.orderId, o.email, o.timestamp));
+            orderList.add(new OrderInfo(o.orderId, o.email, o.timestamp));
+            recentOrders.put(key, orderList);
         }
+
         return alerts;
     }
 
@@ -76,7 +85,7 @@ public class Main {
         if (alerts.isEmpty()) {
             System.out.println("No fraud detected.");
         } else {
-            System.out.println("FRAUD ALERT:");
+            System.out.println("FRAUD ALERTS:");
             for (String a : alerts) System.out.println(a);
         }
     }
